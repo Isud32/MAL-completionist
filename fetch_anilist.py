@@ -4,13 +4,14 @@ import time
 
 ANILIST_URL = "https://graphql.anilist.co"
 QUERY = """
-query ($year: Int, $page: Int) {
-  Page(page: $page, perPage: 500) {
-    media(type: ANIME, seasonYear: $year) {
+query ($startDate: FuzzyDateInt, $endDate: FuzzyDateInt, $page: Int) {
+  Page(page: $page, perPage: 50) {
+    media(type: ANIME, startDate_greater: $startDate, startDate_lesser: $endDate) {
       idMal
       title { romaji english native }
-      seasonYear
+      startDate { year month day }
       season
+      seasonYear
       averageScore
       favourites
       episodes
@@ -65,13 +66,16 @@ def fetch_year(year):
     page = 1
     count = 0
     wait_time = 1
+    start_date = year * 10000 + 101     # YYYY0101 -> Year jan 1 
+    end_date = year * 10000 + 1231      # YYYY1231 -> Year dec 31
 
     while True:
         try:
-            r = requests.post(ANILIST_URL, json={"query": QUERY, "variables": {"year": year, "page": page}})
+
+            r = requests.post(ANILIST_URL, json={"query": QUERY, "variables": {"startDate": start_date, "endDate": end_date, "page": page}})
             r.raise_for_status()
             resp_json = r.json()
-        except (requests.exceptions.RequestException, ValueError) as e:
+        except (requests.exceptions.RequestException, ValueError):
             time.sleep(5)
             continue
 
@@ -136,5 +140,5 @@ def fetch_year(year):
 
 
 if __name__ == "__main__":
-    for y in range(1940, 2024):
+    for y in range(1940, 2026): # 1940 to 2025
         fetch_year(y)
