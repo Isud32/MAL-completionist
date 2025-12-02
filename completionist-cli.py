@@ -124,7 +124,7 @@ class AnimeDB:
                     filter_conditions.append("source = ?")
                     params.append(value)
                 elif key == 'studio' and value:
-                    filter_conditions.append("studio LIKE = ?")
+                    filter_conditions.append("studio LIKE ?")
                     params.append(f"%{value}%")
                     # Not filters, ORDER BY
                 elif key == 'most_popular' and value:
@@ -294,7 +294,7 @@ def year(
     
     # Show available genres for this year
     if not filters.get('genre'):
-        console.print(f"\n[bold] Popular Genres in {year}:[/bold]")
+        console.print(f"\n[bold]Popular Genres in {year}:[/bold]")
         genre_counts = {}
         for anime in remaining:
             if anime.get('genre'):
