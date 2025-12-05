@@ -1,7 +1,7 @@
 import xml.etree.ElementTree as ET 
 import sqlite3
 from typing import List, Optional, Dict
-import typer
+import typer  
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -46,7 +46,7 @@ class AnimeDB:
         self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
         self.watched_ids = load_mal_watched(MAL_EXPORT_PATH)
-    
+
     def get_anime_by_year(self, year: int) -> List[Dict]:
         """Get all anime for a specific year"""
         self.cur.execute("""
@@ -56,7 +56,7 @@ class AnimeDB:
             ORDER BY rating DESC
         """, (year,))
         return [dict(row) for row in self.cur.fetchall()]
-    
+
     def get_year_progress(self) -> List[Dict]:
         """Get progress statistics for all years"""
         self.cur.execute("""
@@ -67,17 +67,17 @@ class AnimeDB:
             HAVING total > 0
             ORDER BY year
         """)
-        
+
         progress_data = []
         for row in self.cur.fetchall():
             year = row['year']
             total = row['total']
             year_list = self.get_anime_by_year(year)
-            
+
             watched = len([a for a in year_list if a['mal_id'] in self.watched_ids])
             remaining = len([a for a in year_list if a['mal_id'] not in self.watched_ids])
             percent = (watched / total * 100) if total > 0 else 0
-            
+
             progress_data.append({
                 'year': year,
                 'watched': watched,
@@ -85,18 +85,18 @@ class AnimeDB:
                 'remaining': remaining,
                 'percent': percent
             })
-        
+
         return progress_data
-    
+
     def search_remaining(self, year: int, filters: Optional[Dict] = None) -> List[Dict]:
         """Get remaining anime for a year with optional filters"""
         query = """
             SELECT * FROM anime 
             WHERE year = ? AND mal_id NOT IN ({})
         """.format(','.join(['?'] * len(self.watched_ids)))
-        
+
         params = [year] + list(self.watched_ids)
-        
+
         # Add filters if provided
         if filters:
             filter_conditions = []
@@ -106,8 +106,15 @@ class AnimeDB:
                     filter_conditions.append("genre LIKE ?")
                     params.append(f'%{value}%')
                 elif key == 'type' and value:
-                    filter_conditions.append("type = ?")
-                    params.append(value)
+                    if isinstance(value, list):
+                        # Multiple types
+                        placeholders = ','.join(['?'] * len(value))
+                        filter_conditions.append(f"type IN ({placeholders})")
+                        params.extend(value)  
+                    else:
+                        # One type
+                        filter_conditions.append("type = ?")
+                        params.append(value)
                 elif key == 'duration_min' and value:
                     filter_conditions.append("duration_per_episode >= ?")
                     params.append(value)
@@ -136,22 +143,22 @@ class AnimeDB:
                 elif key == 'least_episodes' and value:
                     order_clause.append("cant_episodes ASC")
                 elif key == 'longest' and value:
-                    order_clause.append("(cant_episodes * duration_per_episode) DESC")
+                    order_clause.append("COALESCE(cant_episodes, 0) * COALESCE(duration_per_episode, 0) DESC")
                 elif key == 'shortest' and value:
-                    order_clause.append("(cant_episodes * duration_per_episode) ASC")
- 
+                    order_clause.append("COALESCE(cant_episodes, 0) * COALESCE(duration_per_episode, 0) ASC")
 
- 
+
+
             if filter_conditions:
                 query += " AND " + " AND ".join(filter_conditions)
             if order_clause:
                 query += " ORDER BY " + ", ".join(order_clause)
             else:
                 query += " ORDER BY rating DESC"
-        
+
         self.cur.execute(query, params)
         return [dict(row) for row in self.cur.fetchall()]
-    
+
     def close(self):
         self.conn.close()
 
@@ -159,20 +166,20 @@ class AnimeDB:
 def progress():
     """Show progress graph for all years"""
     db = AnimeDB(DB_PATH)
-    
+
     console.print("\n[bold cyan]📊 Anime Completion Progress by Year[/bold cyan]\n")
-    
+
     progress_data = db.get_year_progress()
-    
+
     # Create table
     table = Table(title="Yearly Progress", box=box.ROUNDED)
     table.add_column("Year", style="cyan", justify="center")
     table.add_column("Completed", style="green", justify="center")
     table.add_column("Total", style="white", justify="center")
     table.add_column("Progress", justify="center")
-    
+
     for data in progress_data:
-        
+
         # Color based on completion percentage
         if data['percent'] == 100:
             progress_style = "bold green"
@@ -184,21 +191,21 @@ def progress():
             progress_style = "orange"
         else:
             progress_style = "red"
-        
+
         table.add_row(
             str(data['year']),
             str(data['watched']),
             str(data['total']),
             f"[{progress_style}]{data['percent']:.1f}%[/{progress_style}]",
         )
-    
+
     console.print(table)
-    
+
     # Summary statistics
     total_watched = sum(d['watched'] for d in progress_data)
     total_anime = sum(d['total'] for d in progress_data)
     overall_percent = (total_watched / total_anime * 100) if total_anime > 0 else 0
-    
+
     console.print(f"\n[bold]📈 Overall Progress:[/bold] {total_watched:,}/{total_anime:,} ({overall_percent:.1f}%)")
     db.close()
 
@@ -217,19 +224,21 @@ def year(
     least_popular: bool = typer.Option(False, "--least-popular", help="Sort by least favourites"),
     most_episodes: bool = typer.Option(False, "--most-episodes", help="Sort by most episodes"),
     least_episodes: bool = typer.Option(False, "--least-episodes", help="Sort by least episodes"),
-    longest: bool = typer.Option(False, "--longest", help="Sort by longest total duration (episodes * duration)"),
-    shortest: bool = typer.Option(False, "--shortest", help="Sort by shortest total duration (episodes * duration)"),
-    limit: int = typer.Option(20, "--limit", "-l", help="Number of results to show")
+    longest: bool = typer.Option(False, "--longest","--long", help="Sort by longest total duration "),
+    shortest: bool = typer.Option(False, "--shortest", "--short", help="Sort by shortest total duration"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of results to show"),
+    show: Optional[str] = typer.Option(None, "--show", "-s", help="Show extra columns (source, demo, season, etc)")
 ):
     """Show remaining anime for a specific year with filters"""
     db = AnimeDB(DB_PATH)
-    
+
     # Prepare filters
     filters = {}
     if genre:
         filters['genre'] = genre
     if type_:
-        filters['type'] = type_
+        types = [t.strip().upper() for t in type_.split(",")]
+        filters['type'] = types
     if min_rating:
         filters['rating_min'] = min_rating
     if max_duration:
@@ -254,44 +263,84 @@ def year(
         filters['longest'] = True
     if shortest:
         filters['shortest'] = True
-    
+
+
     remaining = db.search_remaining(year, filters)
-    
+
     if not remaining:
         console.print(f"[yellow]No remaining anime found for {year} with the given filters[/yellow]")
         db.close()
         return
-    
+
+    extra_fields = []
+    if show:
+        extra_fields = [field.strip() for field in show.split(",")]
+        extra_fields = extra_fields[:3]
+        if len(extra_fields) > 3:
+            console.print(f"[yellow]Warning: limit of 3 options in --show: {', '.join(extra_fields)}[/yellow]")
+
     console.print(f"\n[bold cyan]Remaining Anime for {year}[/bold cyan]")
     console.print(f"[white]Found {len(remaining)} anime[/white]\n")
-    
     # Create table
     table = Table(box=box.ROUNDED)
     table.add_column("#", style="dim", width=4)
     table.add_column("Title", style="bold", width=40)
     table.add_column("Type", style="cyan", width=8)
     table.add_column("Rating", style="yellow", width=8)
-    table.add_column("Duration", style="green", width=10)
-    table.add_column("Genre", style="magenta", width=30)
-    
+    table.add_column("Episodes", style="blue", width=8)
+    table.add_column("Duration Episode", style="green", width=10)
+    if "source" in extra_fields: 
+        table.add_column("Source", style="cyan", width=8)
+    if "season" in extra_fields:
+        table.add_column("Season", style="cyan",width=10)
+    if "demographic" in extra_fields:
+        table.add_column("Demographic", style="magenta", width=8)
+    if "genre" in extra_fields:
+        table.add_column("Genre", style="magenta", width=25, no_wrap=True)
+    if "synopsis" in extra_fields:
+        table.add_column("Synopsis", width=60)
+
+
     for i, anime in enumerate(remaining[:limit], 1):
         # Truncate long titles
         title = anime['title'][:37] + "..." if len(anime['title']) > 40 else anime['title']
-        
-        table.add_row(
+
+        row = [
             str(i),
             title,
-            anime.get('type', 'N/A'),
-            str(anime.get('rating', 'N/A')),
-            f"{anime.get('duration_per_episode', 'N/A')} min",
-            anime.get('genre', 'N/A')[:27] + "..." if anime.get('genre') and len(anime['genre']) > 30 else anime.get('genre', 'N/A')
-        )
-    
+            anime.get("type", "N/A"),
+            str(anime.get("rating", "N/A")),
+            str(anime.get("cant_episodes", "N/A")),
+            f"{anime.get('duration_per_episode', 'N/A')} min"
+        ]
+        if "source" in extra_fields:
+            row.append(anime.get("source", "N/A"))
+       
+        if "season" in extra_fields:
+            row.append(anime.get("season", "N/A"))
+
+        if "demographic" in extra_fields:
+            row.append(anime.get("demographic", "N/A"))
+
+        if "genre" in extra_fields:
+            genre = anime.get("genre", "N/A")
+            if genre != "N/A" and len(genre) > 30:
+                genre= genre[:27] + "..."
+            row.append(genre)
+
+        if "synopsis" in extra_fields:
+            synopsis = anime.get("description") or "N/A"
+            if len(synopsis) > 57:
+                synopsis = synopsis[:57] + "..."
+            row.append(synopsis)
+
+
+        table.add_row(*row)
     console.print(table)
-    
+
     if len(remaining) > limit:
         console.print(f"\n[yellow]Showing {limit} of {len(remaining)} results. Use --limit to show more.[/yellow]")
-    
+
     # Show available genres for this year
     if not filters.get('genre'):
         console.print(f"\n[bold]Popular Genres in {year}:[/bold]")
@@ -299,9 +348,9 @@ def year(
         for anime in remaining:
             if anime.get('genre'):
                 genres = [g.strip() for g in anime['genre'].split(',')]
-                for genre in genres:
-                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
-        
+                for genres in genres:
+                    genre_counts[genre] = genre_counts.get(genres, 0) + 1
+
         # Show top 10 genres
         top_genres = sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         genre_str = ", ".join([f"{g[0]} ({g[1]})" for g in top_genres])
@@ -339,7 +388,7 @@ def search(
         db.close()
         return
     
-    console.print(f"\n[bold cyan]🔍 Search Results for '{query}'[/bold cyan]\n")
+    console.print(f"\n[bold cyan]🔍Search Results for '{query}'[/bold cyan]\n")
     
     table = Table(box=box.ROUNDED)
     table.add_column("Title", style="bold", width=40)
@@ -350,8 +399,8 @@ def search(
     
     for anime in results:
         title = anime['title'][:37] + "..." if len(anime['title']) > 40 else anime['title']
-        status = "✅ Watched" if anime['mal_id'] in db.watched_ids else "⏳ Pending"
-        status_style = "green" if "Watched" in status else "yellow"
+        status = "✅ Watched" if anime['mal_id'] in db.watched_ids else "X Not Watched"
+        status_style = "green" if "Watched" in status else "red"
         
         table.add_row(
             title,

@@ -50,7 +50,7 @@ def compare_year(year, watched_ids, year_list):
 # Load MAL export
 watched_ids = load_mal_watched(MAL_EXPORT_PATH)
 
-for year in range(1940, 2025):
+for year in range(2000, 2017):
     year_list = get_anime_by_year(year)
 
     if not year_list:
@@ -59,3 +59,5 @@ for year in range(1940, 2025):
     year, completed, total, percent, remaining = compare_year(year, watched_ids, year_list)
 
     print(f"{year} | {percent:.2f}% | {completed}/{total}")
+
+
